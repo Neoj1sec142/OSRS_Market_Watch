@@ -1,59 +1,466 @@
-# Angular specific
-/dist/
-/out-tsc/
-/tmp/
-/coverage/
-/e2e/test-output/
-/.angular/
-.angular/
 
-# Node modules and dependency files
-/node_modules/
-/package-lock.json
-/yarn.lock
-
-# Environment files
-/.env
-
-# Angular CLI and build artefacts
-/.angular-cli.json
-/.ng/
-
-# TypeScript cache
-*.tsbuildinfo
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# ============================================================
+# NUGGET CAPITAL MANAGEMENT LLC
+# OSRS MARKET WATCH
+#
+# Stack:
+#   ASP.NET Core 10 / EF Core 10
+#   Angular / TypeScript
+#   Python / ML / Jupyter
+#   SQLite
+#   Windows development / macOS ARM64 deployment
+# ============================================================
 
 
-# .NET build artifacts
+# ============================================================
+# 1. OPERATING SYSTEM FILES
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.TemporaryItems/
+.VolumeIcon.icns
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+# Linux
+*~
+
+
+# ============================================================
+# 2. IDE / EDITOR FILES
+# ============================================================
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.suo
+*.userprefs
+
+# JetBrains Rider / IntelliJ
+.idea/
+*.sln.iml
+*.DotSettings.user
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# General editor temp files
+*.swp
+*.swo
+*.bak
+*.orig
+*.tmp
+
+
+# ============================================================
+# 3. .NET / ASP.NET CORE
+# ============================================================
+
 **/bin/
 **/obj/
 
-# Visual Studio / Rider / VS Code
-.vs/
-.idea/
-.vscode/
-*.user
-*.suo
+# Build and publish directories
+**/publish/
+**/Publish/
+**/artifacts/bin/
+**/artifacts/obj/
+**/artifacts/publish/
+**/TestResults/
 
-# Angular / Node
+# Deployment / packaged artifacts
+*.nupkg
+*.snupkg
+*.msi
+*.msix
+*.appx
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# .NET diagnostics
+*.dmp
+*.mdmp
+*.coverage
+*.coveragexml
+
+# ASP.NET local secrets
+**/appsettings.Local.json
+**/appsettings.Development.local.json
+**/appsettings.*.secret.json
+**/secrets.json
+
+# Development HTTPS certificates and keys
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+
+# User-specific publish profiles
+**/Properties/PublishProfiles/*.pubxml.user
+**/Properties/PublishProfiles/*.publishsettings
+
+# Keep EF Core migrations in Git!
+# Do not ignore **/Migrations/
+
+
+# ============================================================
+# 4. ANGULAR / NODE / TYPESCRIPT
+# ============================================================
+
 **/node_modules/
 **/dist/
+**/out-tsc/
 **/.angular/
+**/.cache/
+**/.ng/
+**/.nx/
+**/coverage/
+**/tmp/
+**/.parcel-cache/
 
-# SQLite databases
+# TypeScript build state
+*.tsbuildinfo
+
+# Node diagnostic logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Package manager caches
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.pnpm-store/
+
+# End-to-end test results
+**/test-results/
+**/playwright-report/
+**/e2e/test-output/
+
+# Angular environment files containing local secrets
+**/environment.local.ts
+**/environment.*.local.ts
+
+# KEEP package-lock.json / pnpm-lock.yaml / yarn.lock
+# Lockfiles help produce reproducible builds.
+
+
+# ============================================================
+# 5. PYTHON / VIRTUAL ENVIRONMENTS
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+**/.venv/
+**/venv/
+**/env/
+
+# Python packaging
+*.egg-info/
+*.egg
+.eggs/
+build/
+develop-eggs/
+downloads/
+wheels/
+pip-wheel-metadata/
+
+# Python tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.tox/
+.nox/
+.hypothesis/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Python profiler outputs
+*.prof
+*.pstats
+
+
+# ============================================================
+# 6. JUPYTER NOTEBOOKS
+# ============================================================
+
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Keep actual .ipynb notebooks in Git.
+# Ignore local notebook autosaves/checkpoints only.
+
+
+# ============================================================
+# 7. MACHINE LEARNING / TRAINING ARTIFACTS
+# ============================================================
+
+# Project-specific pipeline outputs
+/pipeline/artifacts/
+/pipeline/outputs/
+/pipeline/checkpoints/
+/pipeline/runs/
+/pipeline/cache/
+/pipeline/logs/
+/pipeline/tmp/
+/pipeline/temp/
+
+# Generated datasets
+/pipeline/data/raw/
+/pipeline/data/processed/
+/pipeline/data/interim/
+/pipeline/data/external/
+
+# Model binaries and checkpoints
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.hdf5
+*.safetensors
+*.tflite
+*.pb
+
+# Serialized numeric datasets
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+
+# TensorBoard / experiment tracking
+events.out.tfevents.*
+mlruns/
+mlartifacts/
+wandb/
+lightning_logs/
+
+# Keep:
+# - Python source code
+# - Feature definitions
+# - Training configuration templates
+# - Evaluation scripts
+# - Documentation
+#
+# Model artifacts should be versioned separately
+# when reproducibility requirements are established.
+
+
+# ============================================================
+# 8. SQLITE / MARKET DATABASES
+# ============================================================
+
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
 
-# Logs
+# SQLite backup files
+*.db.bak
+*.db.backup
+*.sqlite.bak
+*.sqlite3.bak
+
+# Database exports / snapshots
+*.db.gz
+*.sqlite.gz
+*.sqlite3.gz
+
+# Project-generated database directories
+/MarketAPI/Data/backups/
+/MarketAPI/backups/
+/backups/
+/database-backups/
+
+# Retain database schema and migration source files.
+# Do not commit production market data.
+
+
+# ============================================================
+# 9. MACOS / LINUX DEPLOYMENT OUTPUTS
+# ============================================================
+
+# Current publish output:
+# MarketAPI/publish/macos/
+/MarketAPI/publish/
+
+# Additional runtime-specific deployments
+**/osx-arm64/
+**/osx-x64/
+**/linux-arm64/
+**/linux-x64/
+**/win-x64/
+**/win-arm64/
+
+# Generated deployment bundles
+/deploy/output/
+/deploy/packages/
+/deploy/releases/
+/deployment/output/
+
+# Keep deployment scripts and sanitized launchd plist templates.
+# Ignore machine-specific local deployment configuration.
+
+/deploy/*.local
+/deploy/*.local.*
+/deployment/*.local
+/deployment/*.local.*
+
+
+# ============================================================
+# 10. LOGS / RUNTIME STATE
+# ============================================================
+
 *.log
+*.log.*
+logs/
+**/logs/
 
-# Environment / secrets
+# Runtime PID / process state
+*.pid
+*.pid.lock
+
+# Trace files
+*.trace
+*.etl
+*.nettrace
+
+
+# ============================================================
+# 11. SECRETS / LOCAL CONFIGURATION
+# ============================================================
+
 .env
 .env.*
+!.env.example
+!.env.template
+!.env.sample
+
+# Private credentials
+*.secret
+*.secrets
+*.credentials
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# API keys / tokens
+*.token
+*.tokens
+
+# Local machine settings
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+
+# Keep safe example config files in Git.
+
+
+# ============================================================
+# 12. GENERATED REPORTS / EXPORTS
+# ============================================================
+
+/exports/
+/reports/generated/
+/data/exports/
+/data/cache/
+/data/tmp/
+
+# Large tabular exports generated by research jobs
+/pipeline/exports/
+/pipeline/reports/generated/
+
+
+# ============================================================
+# 13. TEST / BENCHMARK OUTPUTS
+# ============================================================
+
+/benchmark-results/
+**/BenchmarkDotNet.Artifacts/
+/test-artifacts/
+/test-output/
+
+
+# ============================================================
+# 14. IMPORTANT SOURCE FILES TO KEEP
+# ============================================================
+
+# Do NOT ignore:
+# - *.cs
+# - *.csproj
+# - *.sln / *.slnx
+# - *.ts
+# - *.html
+# - *.scss
+# - *.py
+# - *.ipynb
+# - *.sql
+# - *.json (except secret/local configuration)
+# - EF Core migrations
+# - Python requirements / pyproject.toml
+# - Angular package.json and package-lock.json
+# - Dockerfiles
+# - LaunchDaemon templates
+# - Build/deployment scripts
+# - Documentation
+# ============================================================

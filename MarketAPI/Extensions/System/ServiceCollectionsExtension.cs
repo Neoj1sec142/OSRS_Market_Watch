@@ -24,6 +24,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteMaintenanceService>();
         services.AddSingleton<DatabaseWriteCoordinator>();
         services.AddSingleton<SqliteMarketBulkWriter>();
+
+        services.AddScoped<MarketAnalyticsService>();
+        
         services.AddHttpClient<OsrsWikiClient>(client =>
         {
             client.BaseAddress = new Uri(

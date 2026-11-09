@@ -46,4 +46,40 @@ public sealed class OsrsWikiClient
             ?? throw new InvalidOperationException(
                 "Wiki 1h response was empty.");
     }
+
+
+    public async Task<WikiAggregateResponse> GetHourlyAtAsync(
+        DateTime bucketStartUtc,
+        CancellationToken ct = default)
+    {
+        var utc = DateTime.SpecifyKind(
+            bucketStartUtc,
+            DateTimeKind.Utc);
+
+        if (utc.Minute != 0 ||
+            utc.Second != 0 ||
+            utc.Millisecond != 0)
+        {
+            throw new ArgumentException(
+                "Hourly bucket timestamp must be aligned to the hour.",
+                nameof(bucketStartUtc));
+        }
+
+        var unixTimestamp = new DateTimeOffset(utc)
+            .ToUnixTimeSeconds();
+
+        var response = await _http
+            .GetFromJsonAsync<WikiAggregateResponse>(
+                $"1h?timestamp={unixTimestamp}",
+                ct);
+
+        if (response == null)
+        {
+            throw new InvalidOperationException(
+                $"Empty hourly response for {utc:O}.");
+        }
+
+        return response;
+    }
+
 }
