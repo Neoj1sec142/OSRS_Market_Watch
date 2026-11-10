@@ -1,4 +1,5 @@
 
+using System.Net;
 using System.Net.Http.Json;
 using MarketAPI.Models;
 
@@ -6,80 +7,145 @@ namespace MarketAPI.Services;
 
 public sealed class OsrsWikiClient
 {
-    private readonly HttpClient _http;
+    private const int MaxAttempts = 3;
 
-    public OsrsWikiClient(HttpClient http)
+    private readonly HttpClient _http;
+    private readonly ILogger<OsrsWikiClient> _logger;
+
+    public OsrsWikiClient(
+        HttpClient http,
+        ILogger<OsrsWikiClient> logger)
     {
         _http = http;
+        _logger = logger;
     }
 
-    public async Task<List<WikiItemDto>> GetItemsAsync(
+    public Task<List<WikiItemDto>> GetItemsAsync(
         CancellationToken ct = default)
-    {
-        return await _http.GetFromJsonAsync<List<WikiItemDto>>(
-            "mapping", ct) ?? new();
-    }
+        => GetWithRetryAsync<List<WikiItemDto>>(
+            "mapping", ct);
 
-    public async Task<WikiLatestResponse> GetLatestAsync(
+    public Task<WikiLatestResponse> GetLatestAsync(
         CancellationToken ct = default)
-    {
-        return await _http.GetFromJsonAsync<WikiLatestResponse>(
-            "latest", ct)
-            ?? throw new InvalidOperationException(
-                "Wiki latest response was empty.");
-    }
+        => GetWithRetryAsync<WikiLatestResponse>(
+            "latest", ct);
 
-    public async Task<WikiAggregateResponse> GetFiveMinuteAsync(
+    public Task<WikiAggregateResponse> GetFiveMinuteAsync(
         CancellationToken ct = default)
-    {
-        return await _http.GetFromJsonAsync<WikiAggregateResponse>(
-            "5m", ct)
-            ?? throw new InvalidOperationException(
-                "Wiki 5m response was empty.");
-    }
+        => GetWithRetryAsync<WikiAggregateResponse>(
+            "5m", ct);
 
-    public async Task<WikiAggregateResponse> GetHourlyAsync(
+    public Task<WikiAggregateResponse> GetHourlyAsync(
         CancellationToken ct = default)
-    {
-        return await _http.GetFromJsonAsync<WikiAggregateResponse>(
-            "1h", ct)
-            ?? throw new InvalidOperationException(
-                "Wiki 1h response was empty.");
-    }
+        => GetWithRetryAsync<WikiAggregateResponse>(
+            "1h", ct);
 
-
-    public async Task<WikiAggregateResponse> GetHourlyAtAsync(
+    public Task<WikiAggregateResponse> GetHourlyAtAsync(
         DateTime bucketStartUtc,
         CancellationToken ct = default)
     {
-        var utc = DateTime.SpecifyKind(
-            bucketStartUtc,
-            DateTimeKind.Utc);
-
-        if (utc.Minute != 0 ||
-            utc.Second != 0 ||
-            utc.Millisecond != 0)
-        {
+        if (bucketStartUtc.Kind == DateTimeKind.Local)
             throw new ArgumentException(
-                "Hourly bucket timestamp must be aligned to the hour.",
+                "Expected a UTC timestamp.",
                 nameof(bucketStartUtc));
-        }
 
-        var unixTimestamp = new DateTimeOffset(utc)
-            .ToUnixTimeSeconds();
+        var utc = DateTime.SpecifyKind(
+            bucketStartUtc, DateTimeKind.Utc);
 
-        var response = await _http
-            .GetFromJsonAsync<WikiAggregateResponse>(
-                $"1h?timestamp={unixTimestamp}",
-                ct);
+        if (utc.Ticks % TimeSpan.TicksPerHour != 0)
+            throw new ArgumentException(
+                "Timestamp must align to a UTC hour.",
+                nameof(bucketStartUtc));
 
-        if (response == null)
-        {
-            throw new InvalidOperationException(
-                $"Empty hourly response for {utc:O}.");
-        }
+        var unixTimestamp =
+            new DateTimeOffset(utc).ToUnixTimeSeconds();
 
-        return response;
+        return GetWithRetryAsync<WikiAggregateResponse>(
+            $"1h?timestamp={unixTimestamp}", ct);
     }
 
+    private async Task<T> GetWithRetryAsync<T>(
+        string endpoint,
+        CancellationToken ct)
+    {
+        for (int attempt = 1;
+             attempt <= MaxAttempts;
+             attempt++)
+        {
+            try
+            {
+                using var response = await _http.GetAsync(
+                    endpoint,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    ct);
+
+                response.EnsureSuccessStatusCode();
+
+                var result = await response.Content
+                    .ReadFromJsonAsync<T>(
+                        cancellationToken: ct);
+
+                return result ??
+                    throw new InvalidOperationException(
+                        $"Empty Wiki response: {endpoint}");
+            }
+            catch (HttpRequestException ex)
+                when (!ct.IsCancellationRequested &&
+                      attempt < MaxAttempts &&
+                      (ex.StatusCode == null ||
+                       IsTransient(ex.StatusCode.Value)))
+            {
+                await DelayBeforeRetryAsync(
+                    endpoint, attempt, ex, ct);
+            }
+            catch (OperationCanceledException ex)
+                when (!ct.IsCancellationRequested &&
+                      attempt < MaxAttempts)
+            {
+                await DelayBeforeRetryAsync(
+                    endpoint, attempt, ex, ct);
+            }
+        }
+
+        // The final attempt propagates its original exception.
+        throw new InvalidOperationException(
+            $"Unexpected retry state for {endpoint}.");
+    }
+
+    private async Task DelayBeforeRetryAsync(
+        string endpoint,
+        int attempt,
+        Exception exception,
+        CancellationToken ct)
+    {
+        // Attempt 1: about 1–1.5 seconds
+        // Attempt 2: about 2–2.5 seconds
+        var baseDelayMs = 1000 * (1 << (attempt - 1));
+        var jitterMs = Random.Shared.Next(0, 501);
+
+        var delay = TimeSpan.FromMilliseconds(
+            baseDelayMs + jitterMs);
+
+        _logger.LogWarning(
+            exception,
+            "Wiki request {Endpoint} failed. " +
+            "Attempt {Attempt}/{MaxAttempts}. " +
+            "Retrying in {DelayMs}ms.",
+            endpoint,
+            attempt,
+            MaxAttempts,
+            delay.TotalMilliseconds);
+
+        await Task.Delay(delay, ct);
+    }
+
+    private static bool IsTransient(
+        HttpStatusCode status)
+    {
+        var code = (int)status;
+
+        return status == HttpStatusCode.RequestTimeout ||
+               code == 429 ||
+               code >= 500;
+    }
 }

@@ -8,8 +8,14 @@ using System.Diagnostics;
 
 namespace MarketAPI.Services;
 
+
 public sealed class MarketStorageOptions
 {
+    // Phase 0 protection:
+    // Historical record deletion is prohibited until
+    // verified, archive-aware cleanup is implemented.
+    public bool EnableDestructiveRetention { get; set; } = false;
+
     public int SnapshotRetentionDays { get; set; } = 14;
     public int FiveMinuteRetentionDays { get; set; } = 90;
     public int HourlyRetentionDays { get; set; } = 730;
@@ -18,6 +24,7 @@ public sealed class MarketStorageOptions
     public int InsertBatchSize { get; set; } = 500;
     public int DeleteBatchSize { get; set; } = 5000;
 }
+
 
 public sealed class MarketRetentionService
 {
@@ -46,122 +53,143 @@ public sealed class MarketRetentionService
     public async Task RunAsync(
         CancellationToken ct = default)
     {
-        var timer = Stopwatch.StartNew();
-        var now = DateTime.UtcNow;
+        ct.ThrowIfCancellationRequested();
 
-        int batchSize = Math.Clamp(
-            _options.DeleteBatchSize, 100, 10000);
-
-        var snapshotCutoff = now.AddDays(
-            -_options.SnapshotRetentionDays);
-
-        var fiveMinuteCutoff = now.AddDays(
-            -_options.FiveMinuteRetentionDays);
-
-        var hourlyCutoff = now.AddDays(
-            -_options.HourlyRetentionDays);
-
-        var batchCutoff = now.AddDays(
-            -_options.BatchRetentionDays);
-
-        int totalDeleted = 0;
-        int passes = 0;
-
-        while (passes < MaxPasses &&
-               timer.Elapsed < MaxDuration)
+        // Phase 0:
+        // Never delete historical data without verified
+        // archive coverage and a committed archive ledger.
+        //
+        // Archive-aware deletion is NOT implemented yet.
+        if (_options.EnableDestructiveRetention)
         {
-            ct.ThrowIfCancellationRequested();
-
-            int deleted = await _coordinator.ExecuteAsync(
-                async token =>
-                {
-                    await using var db = await _factory
-                        .CreateDbContextAsync(token);
-
-                    int snapshots = await db.Database
-                        .ExecuteSqlInterpolatedAsync($"""
-                            DELETE FROM MarketPriceSnapshots
-                            WHERE Id IN (
-                                SELECT Id
-                                FROM MarketPriceSnapshots
-                                WHERE CollectedAtUtc < {snapshotCutoff}
-                                ORDER BY CollectedAtUtc
-                                LIMIT {batchSize}
-                            );
-                            """, token);
-
-                    int fiveMinute = await db.Database
-                        .ExecuteSqlInterpolatedAsync($"""
-                            DELETE FROM MarketPriceAggregates
-                            WHERE Id IN (
-                                SELECT Id
-                                FROM MarketPriceAggregates
-                                WHERE Interval =
-                                    {(int)AggregateInterval.FiveMinutes}
-                                AND BucketStartUtc < {fiveMinuteCutoff}
-                                ORDER BY BucketStartUtc
-                                LIMIT {batchSize}
-                            );
-                            """, token);
-
-                    int hourly = await db.Database
-                        .ExecuteSqlInterpolatedAsync($"""
-                            DELETE FROM MarketPriceAggregates
-                            WHERE Id IN (
-                                SELECT Id
-                                FROM MarketPriceAggregates
-                                WHERE Interval =
-                                    {(int)AggregateInterval.OneHour}
-                                AND BucketStartUtc < {hourlyCutoff}
-                                ORDER BY BucketStartUtc
-                                LIMIT {batchSize}
-                            );
-                            """, token);
-
-                    int batches = await db.Database
-                        .ExecuteSqlInterpolatedAsync($"""
-                            DELETE FROM MarketCollectionBatches
-                            WHERE Id IN (
-                                SELECT b.Id
-                                FROM MarketCollectionBatches b
-                                WHERE b.StartedAtUtc < {batchCutoff}
-                                AND b.Status !=
-                                    {(int)CollectionStatus.Running}
-                                AND NOT EXISTS (
-                                    SELECT 1
-                                    FROM MarketPriceSnapshots s
-                                    WHERE s.CollectionBatchId = b.Id
-                                )
-                                ORDER BY b.StartedAtUtc
-                                LIMIT {batchSize}
-                            );
-                            """, token);
-
-                    return snapshots + fiveMinute +
-                           hourly + batches;
-                },
-                ct);
-
-            passes++;
-            totalDeleted += deleted;
-
-            if (deleted == 0)
-                break;
-
-            // Release the writer gate between passes.
-            await Task.Delay(100, ct);
+            throw new InvalidOperationException(
+                "Destructive retention is prohibited until " +
+                "archive coverage verification and committed " +
+                "archive watermarks are implemented.");
         }
 
-        timer.Stop();
+        _logger.LogDebug(
+            "Market retention cleanup skipped. " +
+            "Archive-first protection is active.");
 
-        _logger.LogInformation(
-            "Retention completed | " +
-            "Deleted={Deleted} | " +
-            "Passes={Passes} | " +
-            "Duration={DurationMs}ms",
-            totalDeleted,
-            passes,
-            timer.ElapsedMilliseconds);
+        return;
+
+        // var timer = Stopwatch.StartNew();
+        // var now = DateTime.UtcNow;
+
+        // int batchSize = Math.Clamp(
+        //     _options.DeleteBatchSize, 100, 10000);
+
+        // var snapshotCutoff = now.AddDays(
+        //     -_options.SnapshotRetentionDays);
+
+        // var fiveMinuteCutoff = now.AddDays(
+        //     -_options.FiveMinuteRetentionDays);
+
+        // var hourlyCutoff = now.AddDays(
+        //     -_options.HourlyRetentionDays);
+
+        // var batchCutoff = now.AddDays(
+        //     -_options.BatchRetentionDays);
+
+        // int totalDeleted = 0;
+        // int passes = 0;
+
+        // while (passes < MaxPasses &&
+        //        timer.Elapsed < MaxDuration)
+        // {
+        //     ct.ThrowIfCancellationRequested();
+
+        //     int deleted = await _coordinator.ExecuteAsync(
+        //         async token =>
+        //         {
+        //             await using var db = await _factory
+        //                 .CreateDbContextAsync(token);
+
+        //             int snapshots = await db.Database
+        //                 .ExecuteSqlInterpolatedAsync($"""
+        //                     DELETE FROM MarketPriceSnapshots
+        //                     WHERE Id IN (
+        //                         SELECT Id
+        //                         FROM MarketPriceSnapshots
+        //                         WHERE CollectedAtUtc < {snapshotCutoff}
+        //                         ORDER BY CollectedAtUtc
+        //                         LIMIT {batchSize}
+        //                     );
+        //                     """, token);
+
+        //             int fiveMinute = await db.Database
+        //                 .ExecuteSqlInterpolatedAsync($"""
+        //                     DELETE FROM MarketPriceAggregates
+        //                     WHERE Id IN (
+        //                         SELECT Id
+        //                         FROM MarketPriceAggregates
+        //                         WHERE Interval =
+        //                             {(int)AggregateInterval.FiveMinutes}
+        //                         AND BucketStartUtc < {fiveMinuteCutoff}
+        //                         ORDER BY BucketStartUtc
+        //                         LIMIT {batchSize}
+        //                     );
+        //                     """, token);
+
+        //             int hourly = await db.Database
+        //                 .ExecuteSqlInterpolatedAsync($"""
+        //                     DELETE FROM MarketPriceAggregates
+        //                     WHERE Id IN (
+        //                         SELECT Id
+        //                         FROM MarketPriceAggregates
+        //                         WHERE Interval =
+        //                             {(int)AggregateInterval.OneHour}
+        //                         AND BucketStartUtc < {hourlyCutoff}
+        //                         ORDER BY BucketStartUtc
+        //                         LIMIT {batchSize}
+        //                     );
+        //                     """, token);
+
+        //             int batches = await db.Database
+        //                 .ExecuteSqlInterpolatedAsync($"""
+        //                     DELETE FROM MarketCollectionBatches
+        //                     WHERE Id IN (
+        //                         SELECT b.Id
+        //                         FROM MarketCollectionBatches b
+        //                         WHERE b.StartedAtUtc < {batchCutoff}
+        //                         AND b.Status !=
+        //                             {(int)CollectionStatus.Running}
+        //                         AND NOT EXISTS (
+        //                             SELECT 1
+        //                             FROM MarketPriceSnapshots s
+        //                             WHERE s.CollectionBatchId = b.Id
+        //                         )
+        //                         ORDER BY b.StartedAtUtc
+        //                         LIMIT {batchSize}
+        //                     );
+        //                     """, token);
+
+        //             return snapshots + fiveMinute +
+        //                    hourly + batches;
+        //         },
+        //         ct);
+
+        //     passes++;
+        //     totalDeleted += deleted;
+
+        //     if (deleted == 0)
+        //         break;
+
+        //     // Release the writer gate between passes.
+        //     await Task.Delay(100, ct);
+        // }
+
+        // timer.Stop();
+
+        // _logger.LogInformation(
+        //     "Retention completed | " +
+        //     "Deleted={Deleted} | " +
+        //     "Passes={Passes} | " +
+        //     "Duration={DurationMs}ms",
+        //     totalDeleted,
+        //     passes,
+        //     timer.ElapsedMilliseconds);
     }
 }
 

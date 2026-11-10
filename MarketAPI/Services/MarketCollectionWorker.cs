@@ -1,6 +1,6 @@
 
 using Microsoft.Extensions.Options;
-
+using System.Diagnostics;
 namespace MarketAPI.Services;
 
 public sealed class MarketCollectorOptions
@@ -17,7 +17,10 @@ public sealed class MarketCollectionWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<MarketCollectorOptions> _options;
     private readonly ILogger<MarketCollectionWorker> _logger;
-
+    private long _attemptCount;
+    private long _failureCount;
+    private int _consecutiveFailures;
+    private DateTime? _lastSuccessUtc;
     public MarketCollectionWorker(
         IServiceScopeFactory scopeFactory,
         IOptions<MarketCollectorOptions> options,
@@ -68,9 +71,15 @@ public sealed class MarketCollectionWorker : BackgroundService
         }
     }
 
+    
     private async Task CollectSafelyAsync(
         CancellationToken ct)
     {
+        var startedAtUtc = DateTime.UtcNow;
+        var timer = Stopwatch.StartNew();
+
+        var attempt = ++_attemptCount;
+
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -80,26 +89,71 @@ public sealed class MarketCollectionWorker : BackgroundService
 
             var result = await service.IngestAsync(ct);
 
+            timer.Stop();
+
+            var recoveredFailures = _consecutiveFailures;
+
+            _consecutiveFailures = 0;
+            _lastSuccessUtc = DateTime.UtcNow;
+
             _logger.LogInformation(
                 "Scheduled ingestion complete. " +
-                "Batch={BatchId}, Snapshots={Snapshots}, " +
-                "Aggregates={Aggregates}",
+                "Attempt={Attempt}, Batch={BatchId}, " +
+                "Snapshots={Snapshots}, Aggregates={Aggregates}, " +
+                "DurationMs={DurationMs}, LastSuccessUtc={LastSuccess}",
+                attempt,
                 result.CollectionBatchId,
                 result.SnapshotsInserted,
-                result.AggregatesAffected);
+                result.AggregatesAffected,
+                timer.ElapsedMilliseconds,
+                _lastSuccessUtc);
+
+            if (recoveredFailures > 0)
+            {
+                _logger.LogInformation(
+                    "Market collection recovered after " +
+                    "{Failures} consecutive failed attempts.",
+                    recoveredFailures);
+            }
         }
         catch (OperationCanceledException)
             when (ct.IsCancellationRequested)
         {
-            // Normal application shutdown.
+            _logger.LogInformation(
+                "Market collection canceled during shutdown.");
         }
         catch (Exception ex)
         {
+            timer.Stop();
+
+            _failureCount++;
+            _consecutiveFailures++;
+
             _logger.LogError(
                 ex,
-                "Scheduled market ingestion failed.");
+                "Scheduled ingestion failed. " +
+                "Attempt={Attempt}, " +
+                "TotalFailures={TotalFailures}, " +
+                "ConsecutiveFailures={ConsecutiveFailures}, " +
+                "DurationMs={DurationMs}, " +
+                "LastSuccessUtc={LastSuccess}",
+                attempt,
+                _failureCount,
+                _consecutiveFailures,
+                timer.ElapsedMilliseconds,
+                _lastSuccessUtc);
 
-            // Let the next timer tick retry.
+            if (_consecutiveFailures >= 3)
+            {
+                _logger.LogWarning(
+                    "Market collector degraded: " +
+                    "{Count} consecutive failed attempts.",
+                    _consecutiveFailures);
+            }
+
+            // The next scheduled tick makes another attempt.
+            // We deliberately do not terminate the worker.
         }
     }
+
 }

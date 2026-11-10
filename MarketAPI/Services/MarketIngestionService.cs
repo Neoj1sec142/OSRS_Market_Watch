@@ -3,7 +3,9 @@ using MarketAPI.Data;
 using MarketAPI.Enums;
 using MarketAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.Diagnostics;
+
 namespace MarketAPI.Services;
 
 public sealed record MarketIngestionResult(
@@ -16,10 +18,19 @@ public sealed record MarketIngestionResult(
 
 public sealed class MarketIngestionService
 {
+    private const string MetadataCacheKey =
+        "market:metadata:refresh-state";
+
+    private static readonly TimeSpan MetadataRefreshInterval =
+        TimeSpan.FromHours(24);
+
+    private static readonly TimeSpan MetadataFailureCooldown =
+        TimeSpan.FromMinutes(30);
     private readonly OsrsWikiClient _wiki;
     private readonly MarketDbContext _db;
     private readonly SqliteMarketBulkWriter _writer;
     private readonly DatabaseWriteCoordinator _coordinator;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<MarketIngestionService> _logger;
 
     public MarketIngestionService(
@@ -27,36 +38,106 @@ public sealed class MarketIngestionService
         MarketDbContext db,
         SqliteMarketBulkWriter writer,
         DatabaseWriteCoordinator coordinator,
+        IMemoryCache cache,
         ILogger<MarketIngestionService> logger)
     {
         _wiki = wiki;
         _db = db;
         _writer = writer;
         _coordinator = coordinator;
+        _cache = cache;
         _logger = logger;
     }
 
     public async Task<MarketIngestionResult> IngestAsync(
         CancellationToken ct = default)
     {
+        
         var totalTimer = Stopwatch.StartNew();
         var fetchTimer = Stopwatch.StartNew();
-        // Network requests happen outside the SQLite write lock.
-        var items = await _wiki.GetItemsAsync(ct);
+
+        // Load known item IDs directly from SQLite.
+        // Price collection can use these even when /mapping fails.
+        var knownItemIds = await _db.MarketItems
+            .AsNoTracking()
+            .Select(x => x.Id)
+            .ToHashSetAsync(ct);
+
+        List<WikiItemDto>? items = null;
+
+        // Refresh mapping on first startup, after cache expiration,
+        // or when the database has no item metadata.
+        bool refreshMetadata =
+            knownItemIds.Count == 0 ||
+            !_cache.TryGetValue(MetadataCacheKey, out _);
+
+        if (refreshMetadata)
+        {
+            try
+            {
+                items = await _wiki.GetItemsAsync(ct);
+
+                if (items.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Wiki mapping response was empty.");
+                }
+
+                _logger.LogInformation(
+                    "Fetched {Count} Wiki item definitions.",
+                    items.Count);
+            }
+            catch (Exception ex)
+                when (!ct.IsCancellationRequested &&
+                    knownItemIds.Count > 0)
+            {
+                // Metadata refresh failure is nonfatal when we
+                // already have item definitions in SQLite.
+                _logger.LogWarning(
+                    ex,
+                    "Wiki metadata refresh failed. " +
+                    "Continuing with {Count} existing items.",
+                    knownItemIds.Count);
+
+                // Try mapping again after a short cooldown.
+                // Do not keep requesting it every five minutes
+                // while the source is unavailable.
+                _cache.Set(
+                    MetadataCacheKey,
+                    true,
+                    MetadataFailureCooldown);
+            }
+        }
+
+        // Market price requests remain mandatory.
         var latest = await _wiki.GetLatestAsync(ct);
         var fiveMinute = await _wiki.GetFiveMinuteAsync(ct);
         var hourly = await _wiki.GetHourlyAsync(ct);
 
         fetchTimer.Stop();
 
-        if (items.Count == 0 ||
-            latest.Data.Count == 0 ||
+        if (latest.Data.Count == 0 ||
             fiveMinute.Data.Count == 0 ||
             hourly.Data.Count == 0)
         {
             throw new InvalidOperationException(
-                "One or more market datasets were empty.");
+                "One or more market price datasets were empty.");
         }
+
+        // Combine existing item IDs with newly fetched definitions.
+        var itemIds = knownItemIds;
+
+        if (items != null)
+        {
+            itemIds.UnionWith(items.Select(x => x.Id));
+        }
+
+        if (itemIds.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "No known market item IDs are available.");
+        }
+
 
         // Prevent our own ingestion/retention jobs from
         // attempting simultaneous writes in this process.
@@ -65,12 +146,28 @@ public sealed class MarketIngestionService
             {
                 var collectedAtUtc = DateTime.UtcNow;
                 var metadataTimer = Stopwatch.StartNew();
-                await SynchronizeItemsAsync(
-                    items, collectedAtUtc, token);
+
+                if (items != null)
+                {
+                    await SynchronizeItemsAsync(
+                        items, collectedAtUtc, token);
+
+                    // Set this only after metadata was successfully
+                    // synchronized with SQLite.
+                    _cache.Set(
+                        MetadataCacheKey,
+                        true,
+                        MetadataRefreshInterval);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Metadata synchronization skipped; " +
+                        "using {Count} existing item IDs.",
+                        knownItemIds.Count);
+                }
+
                 metadataTimer.Stop();
-                var itemIds = items
-                    .Select(x => x.Id)
-                    .ToHashSet();
 
                 var snapshots = BuildSnapshots(
                     latest, itemIds, collectedAtUtc);
@@ -120,7 +217,7 @@ public sealed class MarketIngestionService
                         "{Items} items, {Snapshots} snapshots, " +
                         "{Aggregates} aggregate writes.",
                         batch.Id,
-                        items.Count,
+                        itemIds.Count,
                         inserted,
                         affected);
 
@@ -145,7 +242,7 @@ public sealed class MarketIngestionService
 
                     return new MarketIngestionResult(
                         batch.Id,
-                        items.Count,
+                        itemIds.Count,
                         inserted,
                         affected,
                         batch.CompletedAtUtc.Value);

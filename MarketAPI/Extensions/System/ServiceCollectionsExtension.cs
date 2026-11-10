@@ -32,14 +32,15 @@ public static class ServiceCollectionExtensions
             client.BaseAddress = new Uri(
                 "https://prices.runescape.wiki/api/v2/osrs/");
 
-            client.Timeout = TimeSpan.FromSeconds(60);
+            // Each attempt gets up to 20 seconds.
+            // The client performs at most 3 attempts.
+            client.Timeout = TimeSpan.FromSeconds(20);
 
-            // Replace with a real contact method before regular collection.
             client.DefaultRequestHeaders.TryAddWithoutValidation(
                 "User-Agent",
                 "NuggetCapital-MarketAPI/0.1 (contact: neothej1sec@gmail.com)");
         });
-
+        services.AddMemoryCache();
         return services;
     }
 
