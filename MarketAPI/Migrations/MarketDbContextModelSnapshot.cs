@@ -15,7 +15,7 @@ namespace MarketAPI.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("MarketAPI.Models.BacktestRun", b =>
                 {
@@ -89,6 +89,126 @@ namespace MarketAPI.Migrations
                     b.HasIndex("TradingStrategyId", "StartedAtUtc");
 
                     b.ToTable("BacktestRuns", (string)null);
+                });
+
+            modelBuilder.Entity("MarketAPI.Models.MarketArchiveExport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArchiveFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArchiveSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ArchiveSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CommittedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ExportedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StorageLocation")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("TransferredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId", "ArchiveFileName")
+                        .IsUnique();
+
+                    b.HasIndex("SourceId", "Status", "CreatedAtUtc");
+
+                    b.ToTable("MarketArchiveExports", (string)null);
+                });
+
+            modelBuilder.Entity("MarketAPI.Models.MarketArchiveSource", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId")
+                        .IsUnique();
+
+                    b.ToTable("MarketArchiveSources", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_MarketArchiveSources_Singleton", "\"Id\" = 1");
+                        });
+                });
+
+            modelBuilder.Entity("MarketAPI.Models.MarketArchiveStreamRange", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ArchiveExportId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("EndIdInclusive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("EndUtcExclusive")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("RecordCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("StartIdExclusive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("StartUtcInclusive")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Stream")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchiveExportId", "Stream")
+                        .IsUnique();
+
+                    b.ToTable("MarketArchiveStreamRanges", (string)null);
                 });
 
             modelBuilder.Entity("MarketAPI.Models.MarketCollectionBatch", b =>
@@ -787,6 +907,17 @@ namespace MarketAPI.Migrations
                     b.Navigation("TradingStrategy");
                 });
 
+            modelBuilder.Entity("MarketAPI.Models.MarketArchiveStreamRange", b =>
+                {
+                    b.HasOne("MarketAPI.Models.MarketArchiveExport", "ArchiveExport")
+                        .WithMany("Ranges")
+                        .HasForeignKey("ArchiveExportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ArchiveExport");
+                });
+
             modelBuilder.Entity("MarketAPI.Models.MarketFeatureSnapshot", b =>
                 {
                     b.HasOne("MarketAPI.Models.MarketItem", "MarketItem")
@@ -923,6 +1054,11 @@ namespace MarketAPI.Migrations
                     b.Navigation("MarketSignal");
 
                     b.Navigation("TradingStrategy");
+                });
+
+            modelBuilder.Entity("MarketAPI.Models.MarketArchiveExport", b =>
+                {
+                    b.Navigation("Ranges");
                 });
 
             modelBuilder.Entity("MarketAPI.Models.MarketItem", b =>

@@ -20,6 +20,16 @@ public class MarketDbContext : DbContext
     public DbSet<MarketPriceAggregate> MarketPriceAggregates
         => Set<MarketPriceAggregate>();
 
+    // Incremental historical archives
+    public DbSet<MarketArchiveSource> MarketArchiveSources
+        => Set<MarketArchiveSource>();
+
+    public DbSet<MarketArchiveExport> MarketArchiveExports
+        => Set<MarketArchiveExport>();
+
+    public DbSet<MarketArchiveStreamRange> MarketArchiveStreamRanges
+        => Set<MarketArchiveStreamRange>();
+
     // Analytics
     public DbSet<MarketFeatureSnapshot> MarketFeatureSnapshots
         => Set<MarketFeatureSnapshot>();
@@ -54,6 +64,10 @@ public class MarketDbContext : DbContext
         ConfigureMarketCollectionBatches(modelBuilder);
         ConfigureMarketPriceSnapshots(modelBuilder);
         ConfigureMarketPriceAggregates(modelBuilder);
+
+        ConfigureMarketArchiveSources(modelBuilder);
+        ConfigureMarketArchiveExports(modelBuilder);
+        ConfigureMarketArchiveStreamRanges(modelBuilder);
 
         ConfigureMarketFeatureSnapshots(modelBuilder);
 
@@ -200,6 +214,108 @@ public class MarketDbContext : DbContext
             });
         });
     }
+
+
+    private static void ConfigureMarketArchiveSources(
+        ModelBuilder builder)
+    {
+        builder.Entity<MarketArchiveSource>(entity =>
+        {
+            entity.ToTable("MarketArchiveSources");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Id)
+                .ValueGeneratedNever();
+
+            entity.Property(x => x.SourceId)
+                .IsRequired();
+
+            entity.HasIndex(x => x.SourceId)
+                .IsUnique();
+
+            // Only one source identity per database.
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_MarketArchiveSources_Singleton",
+                "\"Id\" = 1"));
+        });
+    }
+
+    private static void ConfigureMarketArchiveExports(
+        ModelBuilder builder)
+    {
+        builder.Entity<MarketArchiveExport>(entity =>
+        {
+            entity.ToTable("MarketArchiveExports");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Id)
+                .ValueGeneratedNever();
+
+            entity.Property(x => x.SourceId)
+                .IsRequired();
+
+            entity.Property(x => x.Status)
+                .HasConversion<int>();
+
+            entity.Property(x => x.ArchiveFileName)
+                .IsRequired()
+                .HasMaxLength(260);
+
+            entity.Property(x => x.ArchiveSha256)
+                .HasMaxLength(64);
+
+            entity.Property(x => x.ManifestSha256)
+                .HasMaxLength(64);
+
+            entity.Property(x => x.StorageLocation)
+                .HasMaxLength(2000);
+
+            entity.Property(x => x.ErrorMessage)
+                .HasMaxLength(4000);
+
+            entity.HasIndex(x => new
+            {
+                x.SourceId,
+                x.Status,
+                x.CreatedAtUtc
+            });
+
+            entity.HasIndex(x => new
+            {
+                x.SourceId,
+                x.ArchiveFileName
+            }).IsUnique();
+        });
+    }
+
+    private static void ConfigureMarketArchiveStreamRanges(
+        ModelBuilder builder)
+    {
+        builder.Entity<MarketArchiveStreamRange>(entity =>
+        {
+            entity.ToTable("MarketArchiveStreamRanges");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Stream)
+                .HasConversion<int>();
+
+            entity.HasOne(x => x.ArchiveExport)
+                .WithMany(x => x.Ranges)
+                .HasForeignKey(x => x.ArchiveExportId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One range per stream in each archive.
+            entity.HasIndex(x => new
+            {
+                x.ArchiveExportId,
+                x.Stream
+            }).IsUnique();
+        });
+    }
+
 
     #endregion
 

@@ -20,6 +20,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<MarketIngestionService>();
         services.AddScoped<MarketRetentionService>();
+        services.AddScoped<MarketArchivePlanningService>();
+        services.AddScoped<MarketArchiveLedgerService>();
 
         services.AddSingleton<SqliteMaintenanceService>();
         services.AddSingleton<DatabaseWriteCoordinator>();
