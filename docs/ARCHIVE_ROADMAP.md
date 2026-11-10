@@ -1,738 +1,279 @@
-
-# OSRS Market Watch — Development Roadmap
+# OSRS Market Watch — Archive & Research Roadmap
 
 **Project:** Nugget Capital Management LLC  
 **Updated:** 2026-11-10  
-**Current Phase:** Phase 2 — Incremental Archive Contract  
-**Primary Goal:** Build a reliable, long-running OSRS market data platform with permanent historical archives, reproducible ML datasets, and bounded MacBook storage.
+**Current milestone:** Phase 4, Pass 2 — Incremental SQLite archive extraction  
+**Production status:** Collector running on MacBook; archive implementation and tests remain Windows-only.  
+**Non-negotiable:** Destructive retention remains **DISABLED** until permanent archives are independently verified and contiguous coverage authorizes cleanup.
+
+> **Mission:** Collect once. Archive safely. Train repeatedly.
+
+## 1. Architecture & Safety Contract
+
+| Environment | Responsibilities |
+| --- | --- |
+| **MacBook M1 (production)** | .NET 10 MarketAPI LaunchDaemon, SQLite WAL database, five-minute Wiki market collection, bounded retries, cached item mappings. Remains the source of observations until data is durably archived. |
+| **Windows PC (development / research)** | Isolated SQLite test copies, archive generation and validation, permanent archive storage (eventually external/independent media), Python ML research and reproducible datasets. |
+
+### Rules that must always hold
+
+1. Never delete source observations unless durable, verified archive coverage explicitly permits it.
+2. Never advance committed watermarks on `Prepared`, `Exported`, `Transferred`, `Failed`, or merely locally verified files.
+3. Never commit overlapping or discontinuous ranges; detect gaps and conflicting source histories.
+4. Preserve original IDs, UTC timestamps, quote values, volumes, and necessary reference metadata.
+5. Treat source-database GUIDs as lineage identifiers, **not** proof against restored/forked databases.
+6. Treat aggregates as mutable: late upserts, revisions, and historical backfills require a defined policy.
+7. Produce versioned immutable SQLite shards with manifests and checksums; verify the **destination** before commitment.
+8. Never equate a full working backup with an incremental archive shard.
+9. Keep ingestion, export, transfer, retention, and ML training independently testable.
+10. Fail closed on crashes, integrity mismatches, missing ranges, or unavailable archive destinations.
+
+### Archive identities & range conventions
+
+| Stream | Identity | Half-open / exclusive boundary semantics | First-pass finalization delay |
+| --- | --- | --- | --- |
+| Snapshots | Source GUID + snapshot ID | `(StartIdExclusive, EndIdInclusive]` | 48 hours |
+| Five-minute aggregates | Source GUID + item ID + interval + bucket UTC | `[StartUtcInclusive, EndUtcExclusive)` | 6 hours, aligned to complete buckets |
+| Hourly aggregates | Source GUID + item ID + interval + bucket UTC | `[StartUtcInclusive, EndUtcExclusive)` | 24 hours, aligned to complete buckets |
+
+Snapshot IDs are SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`. Aggregates are upserted using `(MarketItemId, Interval, BucketStartUtc)`; hourly interval value is `60`. SQLite UTC timestamps are stored as TEXT with seven fractional digits. Initial finalization delays are **provisional**, not proof against late changes.
+
+Archive lifecycle: `Prepared → Exported → Transferred → Verified → Committed`; `Failed` is a recoverable terminal outcome for a particular attempt. Cleanup progress is separate from archive status.
 
 ---
 
-## Core Architecture
+## 2. Completed Foundations
 
-### MacBook M1 — Production Collector
-- .NET 10 MarketAPI running as a LaunchDaemon.
-- SQLite database with WAL enabled.
-- Five-minute market ingestion.
-- HTTP retry handling and cached item mapping.
-- Archive-first retention protection.
-- Temporary working data and incremental export source.
+### Phase 0 — Retention guard
+**Status:** Safety guard deployed; production verification incomplete.
 
-### Windows PC — Research Platform
-- Python ML pipeline.
-- Permanent historical SQLite archives.
-- Dataset inspection, generation, and verification.
-- Model training, validation, and artifact management.
-- Optional external drive for archival storage.
+- [x] Review retention service, worker, options, maintenance, and deletion risks.
+- [x] Implement fail-closed destructive-retention guard.
+- [x] Deploy collector/guard changes to MacBook; verify startup and successful ingestion.
+- [ ] Verify scheduled worker skip logs and absence of destructive SQL in production.
+- [ ] Confirm effective Mac retention configuration and `auto_vacuum` setting.
+- [ ] Make and restore-test an independent production backup.
 
-### Architectural Rules
+**Current setting:** `MarketStorage.EnableDestructiveRetention = false`. Retention windows below are configured but **not active deletion rules**.
 
-1. NEVER delete data that has not been safely archived.
-2. NEVER commit overlapping historical export ranges.
-3. NEVER advance archival watermarks before verifying the transferred archive.
-4. Preserve original source observations for future dataset regeneration.
-5. Keep the live Mac database reasonably small.
-6. Treat generated training datasets as replaceable artifacts.
-7. Preserve immutable archive files and their manifests.
-8. Keep ingestion, archival, and model training independently testable.
-9. Support recovery from interrupted exports and transfers.
-10. All destructive operations must fail closed.
+### Phase 1 — Network resilience
+**Status:** Deployed; fault injection outstanding.
 
----
+- [x] Bounded HTTP retry with backoff/jitter for transient DNS, timeout, 408, 429, and 5xx failures.
+- [x] Do not retry permanent HTTP errors; use bounded timeouts.
+- [x] Cache mapping refresh state and reuse persisted item metadata if refresh fails.
+- [x] Add collection failure/recovery logging; confirm successful Windows and Mac ingestion.
+- [ ] Test 503→success, 429, DNS failure, timeout exhaustion, 403, cancellation, metadata failures with/without cached items, concurrent manual/scheduled ingestion.
+- [ ] Evaluate persisted failure telemetry.
 
-# Phase 0 — Retention Safety
+### Phase 2 — Archive data contract & ledger schema
+**Status:** Implemented on Windows development database; production deployment deferred.
 
-**Status:** Implemented; final verification pending.
+- [x] Review market schema and bulk ingestion behavior.
+- [x] Define independent snapshot, five-minute, and hourly archival streams.
+- [x] Define archive identities, source GUID, statuses, and initial ranges.
+- [x] Implement `ArchiveStatus`, `ArchiveStream`, `MarketArchiveSource`, `MarketArchiveExport`, and `MarketArchiveStreamRange`.
+- [x] Add EF Core mappings/DbSets, generate `AddMarketArchiveLedger`, and apply migration to Windows development database.
+- [x] Verify archive tables using disposable development databases.
+- [ ] Finalize archive manifest schema, archive schema versioning, value-level verification, and transfer receipts.
+- [ ] Define restore/fork policy, aggregate revisions/backfills, and cross-process reservations.
 
-## Completed
+### Phase 3 — Planning, validation & basic recovery
+**Status:** Implemented and manually validated for eligible aggregates; production hardening outstanding.
 
-- [x] Review MarketRetentionService.
-- [x] Review MarketRetentionWorker.
-- [x] Review MarketStorageOptions.
-- [x] Review current retention configuration.
-- [x] Identify unsafe age-only historical deletion.
-- [x] Design fail-closed retention protection.
-- [x] Implement retention safety guard.
-- [x] Deploy updated application to MacBook.
-- [x] Verify application startup after deployment.
-- [x] Verify SQLite connectivity.
-- [x] Review SqliteMaintenanceService implementation.
+**Implemented**
+- [x] `MarketArchivePlanningService` with persistent source identity, preliminary committed-watermark discovery, finalization delay checks, and `Prepared` range persistence.
+- [x] Pending-reservation rejection within one application instance.
+- [x] Development endpoints for status, preparation, archive details, prepared-range validation, coverage inspection, and failure of unused `Prepared` reservations.
+- [x] `MarketArchiveLedgerService` for read-only **structural** committed-range inspection and controlled prepared-plan failure.
+- [x] Preserve failed attempts and allow a new reservation without advancing committed progress.
 
-## Remaining
+**Verified on disposable Windows databases**
+- [x] Source identity survives API restart in the same database.
+- [x] Aggregate cutoff alignment fix; new plans validate with source counts and boundaries.
+- [x] Initial pending request returns conflict; prepared plan persists.
+- [x] Five-minute range: 12,067 rows; hourly range: 7,970 rows; both validate for the tested fixture.
+- [x] `Prepared` ranges do not count as committed coverage; `SafeToAuthorizeCleanup` stays false.
+- [x] Failure of an unused prepared plan and preparation/validation of an equivalent replacement using the same source GUID.
 
-- [ ] Confirm retention skip message after scheduled worker execution.
-- [ ] Verify no destructive retention SQL executes.
-- [ ] Confirm SQLite auto_vacuum configuration on Mac.
-- [ ] Verify production effective retention configuration.
-- [ ] Copy a verified backup to independent storage.
-- [ ] Perform an actual backup restore/read test.
+**Still required before commitment or cleanup**
+- [ ] Verify repeated failure transition returns HTTP 409.
+- [ ] Test snapshot eligibility, ID-order edge cases, and snapshot range continuity.
+- [ ] Test deliberate committed gaps, overlaps, malformed boundaries, and missing first ranges.
+- [ ] Replace **MAX committed endpoint** logic with verified **contiguous** committed coverage in the planner.
+- [ ] Make reservations atomic across processes (SQLite transaction/constraints, not only `SemaphoreSlim`).
+- [ ] Handle late aggregate corrections and historical backfills without silently skipping changes.
+- [ ] Detect restored/forked source database histories and snapshot ID reuse hazards.
+- [ ] Validate legal lifecycle transitions and crash recovery from every intermediate state.
+- [ ] Add automated integration tests covering planner, ledger, concurrency, and failure paths.
 
-## Current Protection
-
-MarketStorage.EnableDestructiveRetention = false
-
-The retention service must reject attempts to enable
-destructive cleanup until archive-aware verification exists.
-
-## Acceptance Criteria
-
-- Collector continues operating normally.
-- Unarchived market data cannot be automatically deleted.
-- A verified database backup can be restored successfully.
+**Known limitation:** `AllInitializedStreamsContiguous = true` when zero streams are initialized is a vacuous structural result. It **never** authorizes cleanup. Current `SafeToAuthorizeCleanup` remains hard-coded `false`.
 
 ---
 
-# Phase 1 — Network Resilience
+## 3. Current Work — Phase 4: Incremental SQLite Exporter
 
-**Status:** Deployed; fault-injection testing pending.
+**Status:** **Pass 1 verified**; **Pass 2 not implemented**.
 
-## Completed
+### Pass 1 — Consistent working backup **COMPLETE (Windows test)**
 
-- [x] Add bounded HTTP retries.
-- [x] Add exponential backoff and jitter.
-- [x] Handle transient DNS and network failures.
-- [x] Handle HTTP 408, 429, and 5xx responses.
-- [x] Avoid retrying permanent HTTP errors.
-- [x] Reduce HTTP request timeout.
-- [x] Cache item mapping refresh state.
-- [x] Reuse persisted item IDs between mapping refreshes.
-- [x] Continue price ingestion when metadata refresh fails and existing metadata is available.
-- [x] Add collector attempt and recovery logging.
-- [x] Test consecutive successful Windows ingestions.
-- [x] Confirm mapping is not fetched every collection.
-- [x] Deploy updated osx-arm64 application.
-- [x] Confirm successful Mac collection after deployment.
+- [x] Review `DatabaseWriteCoordinator`, hosting/bootstrap, SQLite connection configuration, and package versions.
+- [x] Confirm WAL journal mode, `auto_vacuum = 2` (incremental), and `foreign_keys = 1` on Windows test source.
+- [x] Implement development-only `MarketArchiveBackupService` and `POST /api/dev/archive/working-backup`.
+- [x] Create a consistent full SQLite working copy via the provider backup API (not raw `File.Copy`).
+- [x] Verify `PRAGMA integrity_check = ok` and no `foreign_key_check` violations.
+- [x] Independently verify the working file SHA-256 using PowerShell.
+- [x] Keep backup output isolated from the source DB and outside Git.
 
-## Remaining
+**Verified fixture — 2026-11-10:**
 
-- [ ] Test HTTP 503 followed by success.
-- [ ] Test HTTP 429 and retry behavior.
-- [ ] Test DNS resolution failures.
-- [ ] Test HTTP timeout exhaustion.
-- [ ] Test HTTP 403 without retry.
-- [ ] Test application cancellation.
-- [ ] Test metadata failure with an empty database.
-- [ ] Test metadata failure with previously stored items.
-- [ ] Test simultaneous scheduled/manual ingestion behavior.
-- [ ] Consider persistent collection failure telemetry.
+| Metric | Result |
+| --- | ---: |
+| Market items | 4,675 |
+| Snapshots | 35,746 |
+| Aggregates | 29,964 |
+| Collection batches | 23 |
+| Working backup size | 13,410,304 bytes |
+| Integrity / foreign keys / SHA-256 | Passed / passed / matched |
 
-## Acceptance Criteria
+Working backup SHA-256: `80ec5dcbba8a2d5763113999ac3a0715cf1f76f8fa107c22ecab1a52f58b23f4`.
 
-Transient failures recover automatically without corrupting
-or duplicating market data.
+**Scope limit:** This is a **full working snapshot**, not an incremental archive shard. No archive lifecycle status was advanced. `BackupDatabase()` is synchronous and may interfere with concurrent writes; production scheduling/performance still needs evaluation.
+### Pass 2 — Incremental Extraction
 
----
+- [ ] Implement MarketArchiveExtractionService.
+- [ ] Register extraction service and development endpoint.
+- [ ] Extract reserved snapshot ID ranges.
+- [ ] Extract finalized five-minute aggregate ranges.
+- [ ] Extract finalized hourly aggregate ranges.
+- [ ] Include only referenced market item metadata.
+- [ ] Include referenced collection batch metadata.
+- [ ] Preserve source IDs and stored field values.
+- [ ] Embed archive identity and range metadata.
+- [ ] Verify exported counts against prepared ranges.
+- [ ] Verify exported rows against frozen source values.
+- [ ] Verify SQLite integrity and foreign keys.
+- [ ] Verify candidate SHA-256 independently.
+- [ ] Reject duplicate candidate extraction.
+- [ ] Confirm archive ledger remains Prepared.
+- [ ] Confirm destructive retention remains disabled.
+### Pass 2 — Incremental archive extraction **NEXT**
 
-# Phase 2 — Incremental Archive Contract
+- [ ] Review exact EF models/mappings and current planner/ledger range fields.
+- [ ] Select an existing `Prepared` reservation and validate it against the frozen working copy.
+- [ ] Extract only the planned snapshot ID and aggregate UTC ranges.
+- [ ] Copy required `MarketItems` and `MarketCollectionBatches` reference rows.
+- [ ] Preserve original IDs, timestamps, quantities, prices, and source lineage.
+- [ ] Create a versioned SQLite archive schema with an embedded manifest.
+- [ ] Verify row counts, identities, interval boundaries, and value-level source equality.
+- [ ] Verify archive SQLite integrity and foreign keys.
+- [ ] Compute final-file SHA-256 and publish from a temporary file without overwriting an existing shard.
+- [ ] Leave the export **uncommitted** and do not enable retention.
+- [ ] Test creation, rejection, failure/retry, and cleanup on a disposable Windows database.
 
-**Status:** IN PROGRESS
+### Pass 3 — Export lifecycle / reliability **PLANNED**
 
-## Completed Analysis
+- [ ] Implement guarded `Prepared → Exported` transition with exact file size, hash, manifest hash, and recorded source ranges.
+- [ ] Prevent mismatched backup/plan source identities and stale snapshot races.
+- [ ] Define restart recovery, orphaned temporary files, re-exports, naming collisions, and duplicate prevention.
+- [ ] Measure backup duration and collector impact; define production-safe execution limits.
+- [ ] Add automated exporter integration tests and failure injection.
 
-- [x] Review MarketDbContext.
-- [x] Review MarketPriceSnapshot model.
-- [x] Review MarketPriceAggregate model.
-- [x] Review MarketCollectionBatch model.
-- [x] Review SqliteMarketBulkWriter.
-- [x] Review SqliteMaintenanceService.
-- [x] Confirm snapshot append-only insertion behavior.
-- [x] Confirm snapshot INTEGER PRIMARY KEY AUTOINCREMENT.
-- [x] Confirm snapshot unique index on CollectionBatchId and MarketItemId.
-- [x] Confirm aggregate upsert behavior.
-- [x] Confirm aggregate unique identity:
-      MarketItemId + Interval + BucketStartUtc.
-- [x] Confirm SQLite UTC timestamp text format.
-- [x] Confirm hourly buckets use hour-aligned UTC timestamps.
-- [x] Define independent archival streams.
-- [x] Define initial archive lifecycle states.
-- [x] Design initial archive ledger entities and EF mappings.
-
-## Implementation Tasks
-
-- [ ] Create ArchiveStatus enum.
-- [ ] Create ArchiveStream enum.
-- [ ] Create MarketArchiveSource model.
-- [ ] Create MarketArchiveExport model.
-- [ ] Create MarketArchiveStreamRange model.
-- [ ] Register archive DbSets in MarketDbContext.
-- [ ] Add EF Core archive mappings.
-- [ ] Generate AddMarketArchiveLedger migration.
-- [ ] Review migration for unintended schema changes.
-- [ ] Apply migration to Windows development database.
-- [ ] Verify archive tables and indexes.
-
-## Archive Streams
-
-### Snapshot Stream
-
-Identity:
-    SourceDatabaseId + SnapshotId
-
-Range:
-    (StartIdExclusive, EndIdInclusive]
-
-Rules:
-- Archive previously uncommitted snapshot IDs only.
-- Preserve original snapshot IDs.
-- Preserve collection batch references.
-- Preserve original source timestamps.
-- Use durable source identity to detect restored/rebuilt databases.
-- Never assume timestamp order is equivalent to ID order.
-- Prevent ID reuse or sequence reset after cleanup.
-
-### Five-Minute Aggregate Stream
-
-Identity:
-    SourceDatabaseId + MarketItemId
-    + Interval + BucketStartUtc
-
-Range:
-    [StartUtcInclusive, EndUtcExclusive)
-
-Rules:
-- Archive finalized time buckets.
-- Do not archive actively updating buckets.
-- Use configurable finalization delay.
-- Handle late corrections explicitly.
-- Avoid overlapping committed bucket ranges.
-
-### Hourly Aggregate Stream
-
-Identity:
-    SourceDatabaseId + MarketItemId
-    + Interval + BucketStartUtc
-
-Range:
-    [StartUtcInclusive, EndUtcExclusive)
-
-Rules:
-- Archive finalized hourly buckets.
-- Preserve prices and buy/sell volumes.
-- Use independent hourly archive watermark.
-- Support historical corrections without silently duplicating effective observations.
-
-## Remaining Design Decisions
-
-- [ ] Define source database identity initialization.
-- [ ] Define initial watermarks for all three streams.
-- [ ] Define snapshot archive eligibility cutoff.
-- [ ] Define five-minute finalization delay.
-- [ ] Define hourly finalization delay.
-- [ ] Define late aggregate correction policy.
-- [ ] Define handling for historical backfills.
-- [ ] Define safe behavior after restoring an old live database.
-- [ ] Define archive manifest schema.
-- [ ] Define archive schema versioning.
-- [ ] Define exact record-count verification rules.
-- [ ] Define checksum verification requirements.
-- [ ] Define how concurrent archive planning is prevented.
-- [ ] Define crash recovery and pending export handling.
-
-## Archive Lifecycle
-
-Prepared
-    |
-    v
-Exported
-    |
-    v
-Transferred
-    |
-    v
-Verified
-    |
-    v
-Committed
-
-Failed exports must never authorize cleanup.
-
-Cleanup progress must be tracked separately from archive status.
-
-## Acceptance Criteria
-
-Archive identities, range boundaries, lifecycle transitions,
-and failure recovery rules are explicitly defined and tested.
+**Filename convention:** current ledger uses `market_<YYYYMMDD>_<archive-guid-N>.db`; dates are descriptive, while manifest, source identity, and archive ID are authoritative.
 
 ---
 
+## 4. Future Phases
 
-# Phase 3 — Archive Ledger & Planning Service
+### Phase 5 — Transfer & permanent storage
+**Status:** Not started.
 
-**Status:** IN PROGRESS
+- [ ] Define configurable destination on Windows/external drive and independent recovery copy.
+- [ ] Transfer only complete, validated shards; retry interrupted transfers.
+- [ ] Recalculate destination SHA-256; validate SQLite integrity, schema, manifest, and row counts.
+- [ ] Record durable transfer/verification receipts and storage location.
+- [ ] Implement strictly validated `Exported → Transferred → Verified → Committed` transitions.
+- [ ] Advance watermarks only after continuous, verified, durable coverage.
+- [ ] Preserve immutable archive artifacts and manifests.
 
-## Completed — Initial Implementation
+### Phase 6 — Python ML datasets
+**Status:** Archive-based pipeline not started; existing dataset-inspection utilities are separate groundwork.
 
-- [x] Define first-pass planning rules for three data streams.
-- [x] Implement MarketArchivePlanningService.
-- [x] Register archive planner in dependency injection.
-- [x] Implement persistent source database identity initialization.
-- [x] Implement initial committed stream watermark discovery.
-- [x] Implement initial next-range planning.
-- [x] Implement preliminary stream finalization delays.
-- [x] Store prepared archive ranges.
-- [x] Add initial planning logs and diagnostics.
-- [x] Prevent duplicate pending plans within one application instance.
+- [ ] Read versioned archives and verify manifests/hashes.
+- [ ] Implement archive-aware `inspect`, `generate`, and `verify` CLI operations.
+- [ ] Produce reproducible Parquet datasets with lineage, code/config versions, and checksums.
+- [ ] Support multiple archives, overlapping feature windows, and future-label windows.
+- [ ] Prevent look-ahead bias and training-row duplication.
+- [ ] Use chronological train/validation/test partitions.
+- [ ] Regenerate datasets without relying on the original live DB.
 
-## Completed — Validation & Testing
+### Phase 7 — Archive-aware retention
+**Status:** **Not started — destructive cleanup disabled.**
 
-- [x] Verify source identity persists across application restarts.
-- [x] Add development-only planning interface.
-- [x] Test duplicate/pending archive rejection.
-- [x] Test initial watermark discovery with no committed ranges.
-- [x] Test prepared archive persistence.
-- [x] Add preliminary source-range validation endpoint.
-- [x] Validate prepared aggregate ranges against source counts.
-- [x] Validate freshly prepared aggregate ranges.
-- [x] Verify corrected aggregate finalization boundaries.
-- [x] Verify archive preparation on isolated development database.
-- [x] Verify Prepared archives do not advance committed progress.
-- [x] Test controlled failure of a Prepared archive.
-- [x] Verify failed reservations preserve their original ranges.
-- [x] Test creating a replacement plan after failure.
-- [x] Verify failed reservations do not advance watermarks.
-- [x] Validate replacement archive ranges.
+- [ ] Gate every deletion on verified contiguous committed coverage and a separate cleanup cursor.
+- [ ] Preserve latest per-item snapshot state independently of retained snapshots (dedup baseline).
+- [ ] Respect live-data retention windows and incomplete feature/label windows.
+- [ ] Protect referenced batches; delete in bounded, recoverable batches.
+- [ ] Add dry-run, audit output, disk-space warnings, and WAL/vacuum monitoring.
+- [ ] Test restart halfway through deletion, missing archives, and failed transfers.
 
-- [ ] Test repeated failure transition returns HTTP 409.
-- [ ] Test committed-range gaps and overlaps.
-- [ ] Enforce cross-process archive reservation safety.
-- [ ] Define late aggregate correction policy.
-- [ ] Detect restored or divergent source database histories.
-- [ ] Add automated integration tests.
+Configured windows (**inactive while guard is on**): snapshots 14 days; five-minute aggregates 90 days; hourly aggregates 730 days; collection batches 30 days; worker every 15 minutes; deletion batch size 5,000.
 
-## Pending — Production Hardening
-- [ ] Replace MAX-based watermark selection with
-      contiguous committed coverage validation.
-- [ ] Validate every snapshot in a prepared ID range
-      satisfies archival eligibility.
-- [ ] Enforce cross-process archive reservation safety.
-- [ ] Finalize late aggregate correction handling.
-- [ ] Define historical backfill handling.
-- [ ] Prevent overlapping export plans across processes.
-- [ ] Implement archive state transition validation.
-- [ ] Implement failed export recovery.
-- [ ] Implement archive verification receipt model.
-- [ ] Implement committed watermark calculation
-      with contiguous coverage verification.
-- [ ] Protect against restored database identity conflicts.
-- [ ] Validate archive range continuity and completeness.
+### Phase 8 — Failure & disaster recovery tests
+**Status:** Not started as a comprehensive suite; isolated manual tests are listed above.
 
-## Safety Requirements
-- [ ] Verify archive preparation is idempotent across
-      concurrent application processes.
-- Prepared archives must not advance committed watermarks.
-- Failed archives must not authorize cleanup.
-- Archive ranges must never overlap committed history.
-- Source identity must remain stable across normal deployments.
-- Historical backfills must not silently escape archival coverage.
-- Only verified, committed archives may authorize future cleanup.
-- Destructive retention remains disabled.
+- [ ] Network outage / canceled collection / ingestion interruption.
+- [ ] Export crash, orphan file, checksum mismatch, corrupt archive, manifest mismatch.
+- [ ] Duplicate request, concurrent export, range gap/overlap, late correction/backfill.
+- [ ] Database restore/fork and snapshot ID sequence conflicts.
+- [ ] Failed destination transfer, deletion attempted without coverage, deletion interruption.
+- [ ] Low disk space and multi-archive ML regeneration.
 
-## Acceptance Criteria
+### Phase 9 — Monitoring & Angular operations
+**Status:** Not started as a unified dashboard; some collector health/logging already exists.
 
-- The service creates a persistent source identity.
-- Eligible archive ranges are calculated correctly.
-- Planning is repeatable and safely rejects pending conflicts.
-- All planned ranges are persisted atomically.
-- No market observations are modified during planning.
-- Failed or incomplete plans do not advance committed progress.
-- The planner is tested against a disposable database copy.
-- No destructive cleanup is enabled.
-
+- [ ] Expose DB and disk size, last successful collection, failures, and collector health.
+- [ ] Expose archive plans, statuses, verified destinations, committed coverage, and cleanup eligibility.
+- [ ] Add manual archive management, verification status, and retention dry-run UI.
+- [ ] Show meaningful warnings for uninitialized streams, stale data, and interrupted operations.
 
 ---
 
-# Phase 4 — Incremental SQLite Archive Exporter
+## 5. Immediate Next Steps
 
-**Status:** NOT STARTED
+1. **Gather source definitions for Phase 4 Pass 2:** `MarketDbContext`, four market entities (`MarketItem`, `MarketCollectionBatch`, `MarketPriceSnapshot`, `MarketPriceAggregate`), `MarketArchivePlanningService`, `MarketArchiveExport`, and `MarketArchiveStreamRange`.
+2. Implement extraction from a validated frozen source snapshot into a **small, versioned SQLite shard**.
+3. Validate exact rows, foreign keys, manifest, boundaries, checksum, and safe atomic publication.
+4. Test exclusively on disposable Windows SQLite data; clean test artifacts afterward.
+5. Complete Phase 3 concurrency/continuity/backfill hardening **before** granting archive commitment or cleanup authority.
 
-## Tasks
+**Environment guardrails:** Mac collector unchanged; Windows test uses isolated database path and development-only endpoints; working files live in `MarketAPI/artifacts/archive-work/` and belong in `.gitignore`.
 
-- [ ] Implement consistent SQLite backup preparation.
-- [ ] Implement incremental snapshot extraction.
-- [ ] Implement finalized five-minute aggregate extraction.
-- [ ] Implement finalized hourly aggregate extraction.
-- [ ] Include referenced MarketCollectionBatches.
-- [ ] Include required MarketItems metadata.
-- [ ] Preserve original source values and identifiers.
-- [ ] Create versioned archive SQLite schema.
-- [ ] Generate unique archive ID and filename.
-- [ ] Write archive manifest.
-- [ ] Calculate source/export row counts.
-- [ ] Verify SQLite integrity.
-- [ ] Calculate SHA-256 checksum.
-- [ ] Finalize temporary export atomically.
-- [ ] Record archive export completion.
-- [ ] Handle interrupted exports safely.
-- [ ] Test duplicate prevention.
+## 6. Development Workflow
 
-## Proposed Filename Format
+For each pass:
 
-market_<YYYYMMDD>_<SEQUENCE>.db
+1. Name precise files/methods.
+2. Show **BEFORE → AFTER** for incremental edits; provide complete methods/classes for replacements.
+3. Build on Windows and test against an isolated database.
+4. Run happy-path and failure-path verification.
+5. Update only the relevant roadmap sections and checkboxes.
+6. Review `git diff --check`, stage only intended source/docs/migrations, and commit tested checkpoints.
+7. **Never** deploy unfinished archive features or enable destructive retention on Mac.
 
-Example:
-market_20261110_000001.db
+## 7. Decision Log
 
-File dates are descriptive.
-Archive IDs and manifests are authoritative.
-
-## Acceptance Criteria
-
-Each export produces one verified, immutable SQLite archive
-containing only eligible, previously uncommitted observations.
+| Date | Decision |
+| --- | --- |
+| 2026-11-10 | Archive-first retention: no deletion until independently verified durable coverage. |
+| 2026-11-10 | Separate snapshot-ID and UTC aggregate-bucket streams; preserve original source identities. |
+| 2026-11-10 | Aggregate buckets must be **complete** before crossing the eligibility cutoff. |
+| 2026-11-10 | `Prepared` plans are reservations, not committed history; failed attempts preserve audit records. |
+| 2026-11-10 | Structural ledger continuity alone cannot authorize cleanup. |
+| 2026-11-10 | Full SQLite working backups are verified temporary extraction inputs, **not** final immutable archives. |
+| 2026-11-10 | Source restore/fork detection, late corrections, cross-process serialization, and contiguous committed coverage are mandatory before cleanup. |
 
 ---
 
-# Phase 5 — Transfer & Permanent Archive Storage
-
-**Status:** NOT STARTED
-
-## Tasks
-
-- [ ] Define configurable Windows archive destination.
-- [ ] Support external drive destination.
-- [ ] Implement secure transfer workflow.
-- [ ] Transfer only completed archive files.
-- [ ] Verify destination file checksum.
-- [ ] Run destination SQLite integrity check.
-- [ ] Record verified destination location.
-- [ ] Preserve immutable archives.
-- [ ] Maintain independent recovery copy.
-- [ ] Implement transfer retry/recovery.
-- [ ] Prevent premature removal of temporary source files.
-- [ ] Commit archival ranges only after durable verification.
-
-## Proposed Windows Structure
-
-NuggetCapital/
-    archives/
-        2026/
-            market_20261110_000001.db
-            market_20261117_000002.db
-    manifests/
-    datasets/
-    models/
-    reports/
-
-## Acceptance Criteria
-
-Archives remain accessible after Mac database cleanup
-and pass integrity and checksum verification.
-
----
-
-# Phase 6 — Python Training Dataset Pipeline
-
-**Status:** NOT STARTED
-
-## Proposed CLI
-
-scripts/export_training_data.py
-
-### Inspect
-
-python scripts/export_training_data.py inspect
-    --archive <path-to-archive>
-
-### Generate
-
-python scripts/export_training_data.py generate
-    --archive <path-to-archive>
-    --output <destination>
-    --profile market-v1
-
-### Verify
-
-python scripts/export_training_data.py verify
-    --dataset <dataset-directory>
-
-## Tasks
-
-- [ ] Implement archive schema reader.
-- [ ] Implement archive manifest validation.
-- [ ] Implement inspect command.
-- [ ] Implement generate command.
-- [ ] Implement verify command.
-- [ ] Support configurable output directory.
-- [ ] Support Parquet datasets.
-- [ ] Preserve source archive lineage.
-- [ ] Version training feature definitions.
-- [ ] Version target/label definitions.
-- [ ] Avoid look-ahead bias and target leakage.
-- [ ] Support cross-archive feature windows.
-- [ ] Support cross-archive future labels.
-- [ ] Implement chronological train/validation/test splits.
-- [ ] Support regenerating one archive's dataset.
-- [ ] Support regenerating all historical datasets.
-- [ ] Verify effective training rows are not duplicated.
-- [ ] Record generation code/version and parameters.
-- [ ] Generate dataset manifest and checksums.
-
-## Acceptance Criteria
-
-Historical ML datasets can be regenerated from permanent
-archives without accessing the original live database.
-
----
-
-# Phase 7 — Archive-Aware Retention
-
-**Status:** NOT STARTED — DESTRUCTIVE CLEANUP DISABLED
-
-## Tasks
-
-- [ ] Replace temporary retention safety guard with verified archive checks.
-- [ ] Implement per-stream cleanup eligibility.
-- [ ] Require committed archive coverage before deletion.
-- [ ] Enforce configured live-data retention windows.
-- [ ] Preserve enough recent data for analytics.
-- [ ] Protect incomplete/future training labels.
-- [ ] Preserve latest snapshot deduplication state per item.
-- [ ] Protect collection batches still referenced by snapshots.
-- [ ] Use bounded deletion batches.
-- [ ] Preserve DatabaseWriteCoordinator synchronization.
-- [ ] Track cleanup progress independently.
-- [ ] Implement retention dry-run mode.
-- [ ] Implement disk-space warning thresholds.
-- [ ] Review WAL checkpoint scheduling.
-- [ ] Review incremental vacuum behavior.
-- [ ] Measure storage usage before and after cleanup.
-- [ ] Test interrupted deletion recovery.
-
-## Critical Deduplication Requirement
-
-Current ingestion compares a new snapshot with the most
-recent snapshot still present in the live database.
-
-Deleting historical snapshots may remove that baseline.
-
-Before enabling cleanup, persist each item's latest
-observation state independently of retained history.
-
-This prevents unchanged quotes from being reinserted
-after archival cleanup.
-
-## Acceptance Criteria
-
-Only verified, permanently archived historical records
-are deleted, without breaking ingestion or analytics.
-
----
-
-# Phase 8 — Failure & Recovery Testing
-
-**Status:** NOT STARTED
-
-## Tests
-
-- [ ] Network outage during collection.
-- [ ] HTTP retry exhaustion.
-- [ ] Collector shutdown during ingestion.
-- [ ] Archive creation interrupted.
-- [ ] Archive transfer interrupted.
-- [ ] Checksum mismatch.
-- [ ] Corrupt destination archive.
-- [ ] Duplicate archive request.
-- [ ] Overlapping export plan.
-- [ ] Missing historical range.
-- [ ] Late aggregate correction.
-- [ ] Database restore from old backup.
-- [ ] Snapshot ID reuse prevention.
-- [ ] Archive manifest mismatch.
-- [ ] Cleanup attempted without archive.
-- [ ] Cleanup attempted after failed transfer.
-- [ ] Cleanup interrupted halfway through.
-- [ ] Low disk-space condition.
-- [ ] Regeneration from multiple archive databases.
-- [ ] Cross-archive feature/label boundaries.
-
-## Acceptance Criteria
-
-Failures do not silently lose observations, commit
-invalid archives, or allow unsafe deletion.
-
----
-
-# Phase 9 — Operational Monitoring & Dashboard
-
-**Status:** NOT STARTED
-
-## Tasks
-
-- [ ] Expose collector health through API.
-- [ ] Expose last successful collection.
-- [ ] Expose consecutive failures.
-- [ ] Expose current database size.
-- [ ] Expose disk-space health.
-- [ ] Expose archive history.
-- [ ] Expose committed watermarks.
-- [ ] Expose pending/failed exports.
-- [ ] Expose last verified transfer.
-- [ ] Expose cleanup eligibility.
-- [ ] Add Angular archive operations dashboard.
-- [ ] Add manual archive preparation control.
-- [ ] Add archive verification status.
-- [ ] Add retention dry-run visibility.
-
-## Acceptance Criteria
-
-The entire data lifecycle can be inspected and operated
-without manually querying SQLite or parsing logs.
-
----
-
-# Confirmed Technical Decisions
-
-## Production Environment
-
-- Runtime: .NET 10
-- Database: SQLite / EF Core 10
-- Platform: macOS ARM64, MacBook M1
-- Collection interval: 5 minutes
-- API: localhost-only Kestrel
-- Process manager: macOS LaunchDaemon
-
-## Current Database Behavior
-
-- Snapshot primary key: INTEGER PRIMARY KEY AUTOINCREMENT
-- Snapshot deduplication: latest retained item observation
-- Snapshot uniqueness: CollectionBatchId + MarketItemId
-- Aggregate uniqueness: MarketItemId + Interval + BucketStartUtc
-- Aggregate behavior: UPSERT
-- Timestamp storage: SQLite TEXT, UTC, 7 fractional digits
-- Hourly interval value: 60
-- Collection batches: referenced by snapshot foreign keys
-
-## Current Retention Configuration
-
-- Snapshots: 14 days
-- Five-minute aggregates: 90 days
-- Hourly aggregates: 730 days
-- Collection batches: 30 days
-- Delete batch size: 5000
-- Worker schedule: 15 minutes
-
-NOTE: Destructive retention is currently disabled.
-These retention windows are not active deletion rules
-until archive-aware cleanup is implemented.
-
-## Archive Strategy
-
-- Immutable SQLite archive shards.
-- Original raw observations permanently preserved.
-- One committed archival representation per source record.
-- Explicit handling for late aggregate corrections.
-- Independent archive cursors for each stream.
-- Versioned manifest and SHA-256 verification.
-- Windows/external storage for permanent archives.
-- Python generates replaceable training datasets.
-- Safe cleanup only after verified durable transfer.
-
----
-
-# Current Development Checkpoint
-
-**Date:** 2026-11-10
-
-## Verified
-
-- [x] Mac LaunchDaemon running.
-- [x] MarketAPI health endpoint responding.
-- [x] Production SQLite connected.
-- [x] Successful post-deployment ingestion (batch 257).
-- [x] Updated collector telemetry deployed.
-- [x] Normal metadata caching verified.
-- [x] Snapshot AUTOINCREMENT verified.
-- [x] UTC timestamp storage verified.
-- [x] Aggregate identity and upsert behavior reviewed.
-
-## Still Pending
-
-- [ ] Complete retention safety verification.
-- [ ] Complete fault-injection tests.
-- [ ] Implement archive ledger entities/migration.
-- [ ] Define aggregate finalization and correction policy.
-- [ ] Implement archive planning service.
-- [ ] Implement export-only incremental archive prototype.
-
----
-
-# Immediate Next Steps
-
-1. Implement archive ledger entities and EF Core mappings.
-2. Generate and inspect AddMarketArchiveLedger migration.
-3. Apply migration to Windows development SQLite.
-4. Verify schema and constraints.
-5. Define initial source identity and archival watermarks.
-6. Implement Archive Planning Service.
-7. Test range selection without creating archives.
-8. Proceed to incremental SQLite exporter.
-
-**Important:** Do not enable destructive retention yet.
-
----
-
-# Decision Log
-
-## 2026-11-10 — Archive-first architecture
-Decided to preserve permanent immutable SQLite archive
-shards and regenerate ML datasets from historical sources.
-
-## 2026-11-10 — Retention protection
-Age-based cleanup disabled until verified archive
-coverage can authorize deletion.
-
-## 2026-11-10 — Network hardening
-Added bounded HTTP retries, metadata refresh caching,
-and collector failure/recovery telemetry.
-
-## 2026-11-10 — Incremental identities
-Snapshots use source identity plus AUTOINCREMENT ID.
-Aggregates use source identity, item ID, interval,
-and source bucket start timestamp.
-
-## 2026-11-10 — Archive verification
-Committed archival progress requires successful export,
-destination transfer, integrity verification, and
-independent recovery protection.
-
-## 2026-11-10 — Historical regeneration
-Permanent raw archives are the source of truth.
-Training datasets and ML artifacts may be regenerated
-with newer algorithms and feature versions.
-
-## 2026-11-10 — Archive Range Validation
-
-Aggregate archive eligibility requires the complete
-source bucket to fall outside the finalization delay.
-
-Prepared archives can be checked using a read-only
-validation endpoint.
-
-Range validation does not authorize archive commitment,
-data export verification, or destructive retention.
-
-
----
-
-# Development Rule
-
-For every future development pass:
-
-1. Identify exact files being modified.
-2. Show BEFORE and AFTER for incremental changes.
-3. Provide full replacement methods when appropriate.
-4. Identify full-class replacements by filename.
-5. Verify Windows build and functionality.
-6. Test failures before Mac deployment.
-7. Update relevant roadmap checkboxes.
-8. Commit tested milestones to Git.
-9. Never enable destructive cleanup without verified
-   archive coverage and recovery testing.
-
----
-
-# Nugget Capital Management LLC
-
-**Collect once. Archive safely. Train repeatedly.**
-
-MEOW.
+**Nugget Capital Management LLC — Collect once. Archive safely. Train repeatedly.**  
+**MEOW.**

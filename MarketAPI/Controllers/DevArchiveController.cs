@@ -14,6 +14,8 @@ public sealed class DevArchiveController : ControllerBase
 {
     private readonly MarketArchivePlanningService _planner;
     private readonly MarketArchiveLedgerService _ledger;
+    private readonly MarketArchiveBackupService _backup;
+    private readonly MarketArchiveExtractionService _extractor;
     private readonly IDbContextFactory<MarketDbContext> _factory;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DevArchiveController> _logger;
@@ -21,12 +23,16 @@ public sealed class DevArchiveController : ControllerBase
     public DevArchiveController(
         MarketArchivePlanningService planner,
         MarketArchiveLedgerService ledger,
+        MarketArchiveBackupService backup,
+        MarketArchiveExtractionService extractor,
         IDbContextFactory<MarketDbContext> factory,
         IWebHostEnvironment environment,
         ILogger<DevArchiveController> logger)
     {
         _planner = planner;
         _ledger = ledger;
+        _backup = backup;
+        _extractor = extractor;
         _factory = factory;
         _environment = environment;
         _logger = logger;
@@ -103,6 +109,18 @@ public sealed class DevArchiveController : ControllerBase
         return Ok(report);
     }
 
+    [HttpPost("working-backup")]
+    public async Task<IActionResult> CreateWorkingBackup(
+        CancellationToken ct)
+    {
+        if (!_environment.IsDevelopment())
+            return NotFound();
+
+        var result = await _backup.CreateWorkingBackupAsync(ct);
+
+        return Ok(result);
+    }
+
 
     [HttpPost("{id:guid}/fail")]
     public async Task<IActionResult> FailPreparedArchive(
@@ -151,6 +169,37 @@ public sealed class DevArchiveController : ControllerBase
         }
     }
 
+
+    [HttpPost("{id:guid}/extract")]
+    public async Task<IActionResult> ExtractArchiveCandidate(
+        Guid id,
+        CancellationToken ct)
+    {
+        if (!_environment.IsDevelopment())
+            return NotFound();
+
+        try
+        {
+            var result = await _extractor
+                .CreateCandidateAsync(id, ct);
+
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new
+            {
+                Message = ex.Message
+            });
+        }
+        catch (IOException ex)
+        {
+            return Conflict(new
+            {
+                Message = ex.Message
+            });
+        }
+    }
 
 
     // GET /api/dev/archive/{id}
