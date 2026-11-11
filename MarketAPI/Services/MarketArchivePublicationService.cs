@@ -1,3 +1,4 @@
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -54,6 +55,8 @@ public sealed class MarketArchivePublicationService
     public async Task<ArchivePublicationResult> PublishAsync(
         Guid archiveId,
         bool simulateInterruptionAfterMove = false,
+        bool simulateBeforeManifestMove = false,
+        bool simulateAfterManifestMove = false,
         CancellationToken ct = default)
     {
         if (!_environment.IsDevelopment())
@@ -105,8 +108,10 @@ public sealed class MarketArchivePublicationService
 
         if (archive.Status == ArchiveStatus.Exported)
         {
-            if (simulateInterruptionAfterMove)
-                throw new InvalidOperationException("Cannot simulate interruption for an Exported archive.");
+            if (simulateInterruptionAfterMove || simulateBeforeManifestMove ||
+                simulateAfterManifestMove)
+                throw new InvalidOperationException(
+                    "Cannot simulate interruption for an Exported archive.");
             var (size, hash) = VerifyArtifact(archivePath, archive, null);
             var expectedManifest = BuildManifest(archive, size, hash);
             VerifyManifest(manifestPath, expectedManifest);
@@ -166,7 +171,11 @@ public sealed class MarketArchivePublicationService
 
         // Manifest is a separate sidecar: it contains the DB hash and therefore
         // cannot be embedded into the hashed DB without self-reference.
-        PublishManifest(manifestPath, manifestBytes);
+        PublishManifest(manifestPath, manifestBytes, simulateBeforeManifestMove);
+        if (simulateAfterManifestMove)
+            throw new InvalidOperationException(
+                "SIMULATED interruption: final archive and manifest exist; " +
+                "ledger still Prepared. Retry publication to recover.");
 
         // A conditional single-row update is the only ledger state mutation.
         // The filesystem rename and SQLite commit cannot be one transaction;
@@ -498,7 +507,8 @@ public sealed class MarketArchivePublicationService
         return memory.ToArray();
     }
 
-    private static void PublishManifest(string path, byte[] expected)
+    private static void PublishManifest(
+        string path, byte[] expected, bool simulateBeforeMove)
     {
         if (File.Exists(path))
         {
@@ -518,6 +528,10 @@ public sealed class MarketArchivePublicationService
             stream.Write(expected);
             stream.Flush(flushToDisk: true);
         }
+        if (simulateBeforeMove)
+            throw new InvalidOperationException(
+                "SIMULATED interruption: verified partial manifest exists; " +
+                "final manifest and ledger receipt not yet written.");
         File.Move(partial, path); // no overwrite
         VerifyManifest(path, expected);
     }

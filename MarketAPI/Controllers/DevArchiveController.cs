@@ -129,6 +129,8 @@ public sealed class DevArchiveController : ControllerBase
     public async Task<IActionResult> PublishLocalArchive(
         Guid id,
         [FromQuery] bool simulateAfterMove,
+        [FromQuery] bool simulateBeforeManifestMove,
+        [FromQuery] bool simulateAfterManifestMove,
         CancellationToken ct)
     {
         if (!_environment.IsDevelopment())
@@ -139,32 +141,26 @@ public sealed class DevArchiveController : ControllerBase
             var result = await _publisher.PublishAsync(
                 id,
                 simulateAfterMove,
+                simulateBeforeManifestMove,
+                simulateAfterManifestMove,
                 ct);
 
             return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new
-            {
-                Message = ex.Message
-            });
+            return Conflict(new { Message = ex.Message });
         }
         catch (IOException ex)
         {
-            return Conflict(new
-            {
-                Message = ex.Message
-            });
+            return Conflict(new { Message = ex.Message });
         }
         catch (Microsoft.Data.Sqlite.SqliteException ex)
         {
-            return Conflict(new
-            {
-                Message = ex.Message
-            });
+            return Conflict(new { Message = ex.Message });
         }
     }
+
 
 
 

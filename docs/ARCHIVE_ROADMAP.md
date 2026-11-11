@@ -157,7 +157,8 @@ Working backup SHA-256: `80ec5dcbba8a2d5763113999ac3a0715cf1f76f8fa107c22ecab1a5
 - [ ] Reject duplicate candidate extraction.
 - [ ] Confirm archive ledger remains Prepared.
 - [ ] Confirm destructive retention remains disabled.
-### Pass 2 — Incremental archive extraction **NEXT**
+### Pass 2 — Incremental archive extraction **Status:** Pass 1 verified; Pass 2 aggregate extraction verified;
+Pass 3 local publication under test.
 
 - [ ] Review exact EF models/mappings and current planner/ledger range fields.
 - [ ] Select an existing `Prepared` reservation and validate it against the frozen working copy.
@@ -170,6 +171,22 @@ Working backup SHA-256: `80ec5dcbba8a2d5763113999ac3a0715cf1f76f8fa107c22ecab1a5
 - [ ] Compute final-file SHA-256 and publish from a temporary file without overwriting an existing shard.
 - [ ] Leave the export **uncommitted** and do not enable retention.
 - [ ] Test creation, rejection, failure/retry, and cleanup on a disposable Windows database.
+
+### Pass 3 — Local Export Publication & Recovery
+
+- [ ] Implement MarketArchivePublicationService.
+- [ ] Register development-only publication endpoint.
+- [ ] Revalidate candidate against a fresh frozen source.
+- [ ] Verify embedded archive identity and range metadata.
+- [ ] Generate deterministic external JSON manifest.
+- [ ] Publish final SQLite archive without overwriting.
+- [ ] Record archive size, SHA-256, and manifest SHA-256.
+- [ ] Implement conditional Prepared → Exported transition.
+- [ ] Recover interruption after file publication.
+- [ ] Verify idempotent publication retry.
+- [ ] Confirm later lifecycle timestamps remain unset.
+- [ ] Confirm cleanup remains unauthorized.
+- [ ] Complete Windows build and integration tests.
 
 ### Pass 3 — Export lifecycle / reliability **PLANNED**
 

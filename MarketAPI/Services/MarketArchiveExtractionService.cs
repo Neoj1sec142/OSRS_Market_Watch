@@ -1,3 +1,4 @@
+
 using System.Globalization;
 using System.Security.Cryptography;
 using MarketAPI.Enums;
@@ -57,11 +58,6 @@ public sealed class MarketArchiveExtractionService
         if (archiveId == Guid.Empty)
             throw new ArgumentException("Archive ID is required.", nameof(archiveId));
 
-        // Always take the working backup AFTER the archive has been Prepared.
-        // The backup freezes both the plan and the source rows.
-        var working = await _backups.CreateWorkingBackupAsync(ct);
-        ct.ThrowIfCancellationRequested();
-
         var outputDirectory = Path.Combine(
             _environment.ContentRootPath, "artifacts", "archive-candidates");
         Directory.CreateDirectory(outputDirectory);
@@ -69,9 +65,22 @@ public sealed class MarketArchiveExtractionService
         var stem = $"market_{archiveId:N}";
         var partialPath = Path.Combine(outputDirectory, stem + ".partial.db");
         var candidatePath = Path.Combine(outputDirectory, stem + ".candidate.db");
+        var lockPath = Path.Combine(outputDirectory, $".{archiveId:N}.extract.lock");
+
+        // FileShare.None provides a cross-process, per-archive extraction lock.
+        // Do not remove lock files: unlinking a live lock creates a second inode
+        // and can permit simultaneous writers on some filesystems.
+        await using var extractionLock = new FileStream(
+            lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
         if (File.Exists(partialPath) || File.Exists(candidatePath))
-            throw new IOException("A candidate or partial file already exists for this archive. Inspect it rather than overwrite it.");
+            throw new IOException(
+                "A candidate or partial file already exists for this archive. " +
+                "Inspect it rather than overwrite it.");
+
+        // Freeze the plan and source *after* acquiring the extraction lock.
+        var working = await _backups.CreateWorkingBackupAsync(ct);
+        ct.ThrowIfCancellationRequested();
 
         try
         {
@@ -98,11 +107,17 @@ public sealed class MarketArchiveExtractionService
         }
         catch
         {
-            foreach (var path in new[] { partialPath, candidatePath })
+            // Remove ONLY the temporary file we created. If the rename
+            // succeeded before a later exception, preserve the candidate for
+            // inspection/recovery; never silently delete a published artifact.
+            foreach (var path in new[]
+            {
+                partialPath,
+                partialPath + "-wal",
+                partialPath + "-shm"
+            })
             {
                 if (File.Exists(path)) File.Delete(path);
-                if (File.Exists(path + "-wal")) File.Delete(path + "-wal");
-                if (File.Exists(path + "-shm")) File.Delete(path + "-shm");
             }
             throw;
         }
