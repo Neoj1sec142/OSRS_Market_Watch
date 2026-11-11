@@ -16,6 +16,7 @@ public sealed class DevArchiveController : ControllerBase
     private readonly MarketArchiveLedgerService _ledger;
     private readonly MarketArchiveBackupService _backup;
     private readonly MarketArchiveExtractionService _extractor;
+    private readonly MarketArchivePublicationService _publisher;
     private readonly IDbContextFactory<MarketDbContext> _factory;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DevArchiveController> _logger;
@@ -25,6 +26,7 @@ public sealed class DevArchiveController : ControllerBase
         MarketArchiveLedgerService ledger,
         MarketArchiveBackupService backup,
         MarketArchiveExtractionService extractor,
+        MarketArchivePublicationService publisher,
         IDbContextFactory<MarketDbContext> factory,
         IWebHostEnvironment environment,
         ILogger<DevArchiveController> logger)
@@ -33,6 +35,7 @@ public sealed class DevArchiveController : ControllerBase
         _ledger = ledger;
         _backup = backup;
         _extractor = extractor;
+        _publisher = publisher;
         _factory = factory;
         _environment = environment;
         _logger = logger;
@@ -120,6 +123,49 @@ public sealed class DevArchiveController : ControllerBase
 
         return Ok(result);
     }
+
+
+    [HttpPost("{id:guid}/publish")]
+    public async Task<IActionResult> PublishLocalArchive(
+        Guid id,
+        [FromQuery] bool simulateAfterMove,
+        CancellationToken ct)
+    {
+        if (!_environment.IsDevelopment())
+            return NotFound();
+
+        try
+        {
+            var result = await _publisher.PublishAsync(
+                id,
+                simulateAfterMove,
+                ct);
+
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new
+            {
+                Message = ex.Message
+            });
+        }
+        catch (IOException ex)
+        {
+            return Conflict(new
+            {
+                Message = ex.Message
+            });
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            return Conflict(new
+            {
+                Message = ex.Message
+            });
+        }
+    }
+
 
 
     [HttpPost("{id:guid}/fail")]
